@@ -1,21 +1,55 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"sync/atomic"
 )
+
+type apiConfig struct {
+	fileserverHits atomic.Int32
+}
+
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits.Add(1)
+		next.ServeHTTP(w, r)
+	})
+}
+
+var apiCfg = apiConfig{
+	fileserverHits: atomic.Int32{},
+}
 
 func main() {
 	serveMux := http.NewServeMux()
 
-	serveMux.Handle("/app/assets/", http.StripPrefix("/app/assets", http.FileServer(http.Dir("assets"))))
-	serveMux.Handle("/app", http.StripPrefix("/app", http.FileServer(http.Dir("."))))
+	assetsHandler := http.StripPrefix("/app/assets", http.FileServer(http.Dir("assets")))
+	serveMux.Handle("/app/assets/", apiCfg.middlewareMetricsInc(assetsHandler))
 
-	serveMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	rootHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
+	serveMux.Handle("/app", apiCfg.middlewareMetricsInc(rootHandler))
+
+	healthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(200)
 		w.Write([]byte("OK"))
 	})
+	serveMux.Handle("/healthz", apiCfg.middlewareMetricsInc(healthHandler))
 	
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8" )
+		w.WriteHeader(200)
+		w.Write([]byte(fmt.Sprintf("Hits: %v", apiCfg.fileserverHits.Load())))
+	})
+	serveMux.Handle("/metrics", metricsHandler)
+
+	resetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCfg.fileserverHits.Store(0)
+		w.WriteHeader(200)
+	})
+	serveMux.Handle("/reset", resetHandler)
+
 	server := &http.Server{
 		Addr: ":8080",
 		Handler: serveMux,
