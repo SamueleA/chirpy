@@ -35,20 +35,20 @@ func main() {
 		w.WriteHeader(200)
 		w.Write([]byte("OK"))
 	})
-	serveMux.Handle("/healthz", apiCfg.middlewareMetricsInc(healthHandler))
+	serveMux.Handle("GET /healthz", apiCfg.middlewareMetricsInc(healthHandler))
 	
 	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8" )
 		w.WriteHeader(200)
 		w.Write([]byte(fmt.Sprintf("Hits: %v", apiCfg.fileserverHits.Load())))
 	})
-	serveMux.Handle("/metrics", metricsHandler)
+	serveMux.Handle("GET /metrics", metricsHandler)
 
 	resetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiCfg.fileserverHits.Store(0)
 		w.WriteHeader(200)
 	})
-	serveMux.Handle("/reset", resetHandler)
+	serveMux.Handle("POST /reset", resetHandler)
 
 	server := &http.Server{
 		Addr: ":8080",
