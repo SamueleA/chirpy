@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -37,6 +38,76 @@ func main() {
 	})
 	serveMux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(healthHandler))
 	
+	// validate_chirp
+	validateChirpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		genericErrorMessage := "Something went wrong"
+
+		type successResponse struct {
+			Valid bool `json:"valid"`
+		}
+
+		type errorResponse struct {
+			Error string `json:"error"`
+		}
+
+		type reqBody struct {
+			Body string `json:"body"`
+		} 
+
+		var decodedRedBody reqBody
+
+		decoder := json.NewDecoder(r.Body)
+		
+		err := decoder.Decode(&decodedRedBody)
+
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(500)
+			resp, _ := json.Marshal(errorResponse{
+				Error: genericErrorMessage,
+			})
+
+			w.Write(resp)
+			return
+		}
+
+		isValid := len(decodedRedBody.Body) <= 140
+
+
+		if !isValid {
+			bodyToSend, _ := json.Marshal(errorResponse{
+				Error: "Chirp is too long",
+			})
+		
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			w.Write(bodyToSend)
+			return
+		}		
+
+		bodyToSend, err := json.Marshal(successResponse{
+			Valid: true,
+		})
+
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(500)
+			genericErr, _ := json.Marshal(errorResponse{
+				Error: genericErrorMessage,
+			})
+			
+			w.Write(genericErr)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(bodyToSend)
+	})
+	
+	serveMux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(validateChirpHandler))
+
 	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html" )
 		w.WriteHeader(200)
