@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/samuelea/chirpy/internal/utils"
 )
 
 type apiConfig struct {
@@ -46,10 +48,6 @@ func main() {
 			Valid bool `json:"valid"`
 		}
 
-		type errorResponse struct {
-			Error string `json:"error"`
-		}
-
 		type reqBody struct {
 			Body string `json:"body"`
 		} 
@@ -61,13 +59,7 @@ func main() {
 		err := decoder.Decode(&decodedRedBody)
 
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			resp, _ := json.Marshal(errorResponse{
-				Error: genericErrorMessage,
-			})
-
-			w.Write(resp)
+			utils.RespondWithError(w, 500, genericErrorMessage)
 			return
 		}
 
@@ -75,35 +67,19 @@ func main() {
 
 
 		if !isValid {
-			bodyToSend, _ := json.Marshal(errorResponse{
-				Error: "Chirp is too long",
-			})
-		
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(400)
-			w.Write(bodyToSend)
+			utils.RespondWithError(w, 400, "Chirp is too long")
 			return
 		}		
 
-		bodyToSend, err := json.Marshal(successResponse{
+		err = utils.RespondWithJSon(w, 200, successResponse{
 			Valid: true,
 		})
 
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			genericErr, _ := json.Marshal(errorResponse{
-				Error: genericErrorMessage,
-			})
-			
-			w.Write(genericErr)
-
-			return
+			utils.RespondWithError(w, 500, genericErrorMessage)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		w.Write(bodyToSend)
+		return
 	})
 	
 	serveMux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(validateChirpHandler))
