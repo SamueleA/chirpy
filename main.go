@@ -24,6 +24,8 @@ var apiCfg = apiConfig{
 	fileserverHits: atomic.Int32{},
 }
 
+var prohibitedWords = []string{"kerfuffle", "sharbert", "fornax"}
+
 func main() {
 	serveMux := http.NewServeMux()
 
@@ -45,7 +47,8 @@ func main() {
 		genericErrorMessage := "Something went wrong"
 
 		type successResponse struct {
-			Valid bool `json:"valid"`
+			Valid bool 		`json:"valid,omitempty"`
+			CleanedBody string `json:"cleaned_body,omitempty"`
 		}
 
 		type reqBody struct {
@@ -71,15 +74,21 @@ func main() {
 			return
 		}		
 
-		err = utils.RespondWithJSon(w, 200, successResponse{
-			Valid: true,
-		})
+		cleanMsg := utils.GetCorrectedString(decodedRedBody.Body, prohibitedWords)
+
+		if cleanMsg.WasCensored {
+			err = utils.RespondWithJSon(w, 200, successResponse{
+				CleanedBody: cleanMsg.CorrectedMsg,
+			})
+		} else {
+			err = utils.RespondWithJSon(w, 200, successResponse{
+				CleanedBody: cleanMsg.CorrectedMsg,
+			})
+		}
 
 		if err != nil {
 			utils.RespondWithError(w, 500, genericErrorMessage)
 		}
-
-		return
 	})
 	
 	serveMux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(validateChirpHandler))
