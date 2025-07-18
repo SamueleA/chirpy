@@ -1,11 +1,16 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
 
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 	"github.com/samuelea/chirpy/internal/utils"
 )
 
@@ -27,6 +32,17 @@ var apiCfg = apiConfig{
 var prohibitedWords = []string{"kerfuffle", "sharbert", "fornax"}
 
 func main() {
+	godotenv.Load()
+	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
+	
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer db.Close()
+
+	// dbQueries := database.New(db)
+
 	serveMux := http.NewServeMux()
 
 	assetsHandler := http.StripPrefix("/app/assets", http.FileServer(http.Dir("assets")))
