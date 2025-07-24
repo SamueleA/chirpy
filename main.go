@@ -8,11 +8,16 @@ import (
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/samuelea/chirpy/internal/database"
 	"github.com/samuelea/chirpy/internal/utils"
 )
+
+var genericErrorMessage string =  "Something went wrong"
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
@@ -41,7 +46,7 @@ func main() {
 
 	defer db.Close()
 
-	// dbQueries := database.New(db)
+	dbQueries := database.New(db)
 
 	serveMux := http.NewServeMux()
 
@@ -60,7 +65,6 @@ func main() {
 	
 	// validate_chirp
 	validateChirpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		genericErrorMessage := "Something went wrong"
 
 		type successResponse struct {
 			Valid bool 		`json:"valid,omitempty"`
@@ -125,9 +129,58 @@ func main() {
 	serveMux.Handle("GET /admin/metrics", metricsHandler)
 
 	resetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		environment := os.Getenv("PLATFORM")
+		
+		if environment == "dev" {
+			err := dbQueries.ClearUsers(r.Context())
+			if err != nil {
+				utils.RespondWithError(w, 500, "Failed to reset users")
+			}
+		}
+
 		apiCfg.fileserverHits.Store(0)
 		w.WriteHeader(200)
 	})
+
+
+	createUser := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type Input struct {
+			Email string `json:"email"`
+		}	
+
+		decoder := json.NewDecoder(r.Body)
+
+		var decodedInput Input
+
+		err := decoder.Decode(&decodedInput)
+
+		if err != nil {
+			utils.RespondWithError(w, 400, "Wrong input data")
+		}
+
+		user, err := dbQueries.CreateUser(r.Context(), decodedInput.Email)
+
+		if err != nil {
+			utils.RespondWithError(w, 500, "a user with that email already exists")
+			return
+		}
+
+		type CreateUserResponse struct {
+			ID 				uuid.UUID `json:"id"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt	time.Time	`json:"updated_at"`
+			Email			string		`json:"email"`
+		}
+
+		utils.RespondWithJSon(w, 201, CreateUserResponse{
+			ID: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		})
+	})
+
+	serveMux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(createUser))
 
 	serveMux.Handle("POST /admin/reset", resetHandler)
 
@@ -138,3 +191,4 @@ func main() {
 
 	server.ListenAndServe()
 }
+

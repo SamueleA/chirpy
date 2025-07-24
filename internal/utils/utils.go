@@ -32,7 +32,7 @@ func RespondWithJSon(w http.ResponseWriter, code int, payload interface{}) error
 
 	
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	w.WriteHeader(code)
 	w.Write(bodyToSend)
 
 	return nil
