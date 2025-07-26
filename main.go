@@ -193,8 +193,42 @@ func main() {
 
 	serveMux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(createUser))
 
-	serveMux.Handle("POST /admin/reset", resetHandler)
+	getChirps := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type successResponse struct {
+			Id				uuid.UUID	`json:"id"`
+			UserId		uuid.UUID	`json:"user_id"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+			Body			string		`json:"body"`
+		}
 
+		type response []successResponse
+
+		chirps, err := dbQueries.GetChirps(r.Context())
+
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+		}
+
+		var chirpList response
+		for i := range(len(chirps)) {
+			chirp := chirps[i]
+			chirpList = append(chirpList, successResponse{
+				Id: chirp.ID,
+				UserId: chirp.UserID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body: chirp.Body,
+			})
+		}
+
+		utils.RespondWithJSon(w, 200, &chirpList)
+	})
+
+	serveMux.Handle("GET /api/chirps", apiCfg.middlewareMetricsInc(getChirps))
+
+	serveMux.Handle("POST /admin/reset", resetHandler)
+	
 	server := &http.Server{
 		Addr: ":8080",
 		Handler: serveMux,
@@ -202,4 +236,5 @@ func main() {
 
 	server.ListenAndServe()
 }
+
 
