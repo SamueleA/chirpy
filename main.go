@@ -63,16 +63,18 @@ func main() {
 	})
 	serveMux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(healthHandler))
 	
-	// validate_chirp
-	validateChirpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
+	createChirp := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
 		type successResponse struct {
-			Valid bool 		`json:"valid,omitempty"`
-			CleanedBody string `json:"cleaned_body,omitempty"`
+			Id				uuid.UUID	`json:"id"`
+			UserId		uuid.UUID	`json:"user_id"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+			Body			string		`json:"body"`
 		}
 
 		type reqBody struct {
-			Body string `json:"body"`
+			Body 		string `json:"body"`
+			UserId	string `json:"user_id"`
 		} 
 
 		var decodedRedBody reqBody
@@ -88,7 +90,6 @@ func main() {
 
 		isValid := len(decodedRedBody.Body) <= 140
 
-
 		if !isValid {
 			utils.RespondWithError(w, 400, "Chirp is too long")
 			return
@@ -96,22 +97,32 @@ func main() {
 
 		cleanMsg := utils.GetCorrectedString(decodedRedBody.Body, prohibitedWords)
 
-		if cleanMsg.WasCensored {
-			err = utils.RespondWithJSon(w, 200, successResponse{
-				CleanedBody: cleanMsg.CorrectedMsg,
-			})
-		} else {
-			err = utils.RespondWithJSon(w, 200, successResponse{
-				CleanedBody: cleanMsg.CorrectedMsg,
-			})
+		parsedUUID, err := uuid.Parse(decodedRedBody.UserId)
+
+		if err != nil {
+			utils.RespondWithError(w, 400, "invalid user id")
+			return
 		}
+
+		chirp, err := dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+			UserID: parsedUUID,
+			Body: cleanMsg.CorrectedMsg,
+		})
 
 		if err != nil {
 			utils.RespondWithError(w, 500, genericErrorMessage)
 		}
+
+		utils.RespondWithJSon(w, 201, successResponse{
+			Id: chirp.ID,
+			UserId: chirp.UserID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body: chirp.Body,
+		})
 	})
-	
-	serveMux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(validateChirpHandler))
+
+	serveMux.Handle("POST /api/chirps", apiCfg.middlewareMetricsInc(createChirp))
 
 	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html" )
