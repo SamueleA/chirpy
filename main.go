@@ -227,6 +227,44 @@ func main() {
 
 	serveMux.Handle("GET /api/chirps", apiCfg.middlewareMetricsInc(getChirps))
 
+	getChirp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chirpID := r.PathValue("chirpID")
+
+		uChirpID, err := uuid.Parse(chirpID)
+
+		if err != nil {
+			utils.RespondWithError(w, 400, "invalid id")
+			return
+		}
+		
+		chirp, err := dbQueries.GetChirp(r.Context(), uChirpID)
+
+		if err != nil {
+			utils.RespondWithError(w, 404, "user not found")
+			return
+		}
+
+		type successResponse struct {
+			Id				uuid.UUID	`json:"id"`
+			CreatedAt	time.Time `json:"created_at"`
+			UpdatedAt time.Time	`json:"updated_at"`
+			Body 			string 		`json:"body"`	
+			UserId 		uuid.UUID `json:"user_id"`
+		}
+
+		res := successResponse{
+			Id: chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body: chirp.Body,
+			UserId: chirp.UserID,
+		}
+
+		utils.RespondWithJSon(w, 200, res)
+	})
+	
+	serveMux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(getChirp))
+
 	serveMux.Handle("POST /admin/reset", resetHandler)
 	
 	server := &http.Server{
