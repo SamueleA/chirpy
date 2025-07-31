@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/samuelea/chirpy/internal/auth"
 	"github.com/samuelea/chirpy/internal/database"
 	"github.com/samuelea/chirpy/internal/utils"
 )
@@ -156,7 +157,8 @@ func main() {
 
 	createUser := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		type Input struct {
-			Email string `json:"email"`
+			Email 		string `json:"email"`
+			Password 	string `json:"password"`
 		}	
 
 		decoder := json.NewDecoder(r.Body)
@@ -167,9 +169,20 @@ func main() {
 
 		if err != nil {
 			utils.RespondWithError(w, 400, "Wrong input data")
+			return
 		}
 
-		user, err := dbQueries.CreateUser(r.Context(), decodedInput.Email)
+		hashedPassword, err := auth.HashPassword(decodedInput.Password)
+		
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		}
+
+		user, err := dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+			Email: decodedInput.Email,
+			HashedPassword: hashedPassword,
+		})
 
 		if err != nil {
 			utils.RespondWithError(w, 500, "a user with that email already exists")
@@ -192,6 +205,54 @@ func main() {
 	})
 
 	serveMux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(createUser))
+	
+	login := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type body struct {
+			Email			string	`json:"email"`
+			Password	string	`json:"password"`
+		}
+
+		type sucessResponse struct {
+			Id				uuid.UUID	`json:"id"`
+			UpdatedAt	time.Time	`json:"updated_at"`
+			CreatedAt	time.Time	`json:"created_at"`
+			Email			string		`json:"email"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		
+		var decodedBody body
+
+		err := decoder.Decode(&decodedBody)
+
+		if err != nil {
+			utils.RespondWithError(w, 400, genericErrorMessage)
+			return
+		}
+
+		user, err := dbQueries.GetUser(r.Context(), decodedBody.Email)	
+
+		if err != nil {
+			utils.RespondWithError(w, 401, "Invalid email or password")
+		}
+
+		err = auth.CheckPasswordHash(decodedBody.Password, user.HashedPassword)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, "Invalid email or password")
+		}
+
+		response := sucessResponse{
+			Id: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		}
+
+		utils.RespondWithJSon(w, 200, response)
+	})
+
+	serveMux.Handle("POST /api/login", apiCfg.middlewareMetricsInc(login))
 
 	getChirps := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		type successResponse struct {
