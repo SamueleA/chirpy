@@ -21,7 +21,8 @@ import (
 var genericErrorMessage string =  "Something went wrong"
 
 type apiConfig struct {
-	fileserverHits atomic.Int32
+	fileserverHits 	atomic.Int32
+	jwtSecret				string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -31,14 +32,16 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-var apiCfg = apiConfig{
-	fileserverHits: atomic.Int32{},
-}
-
 var prohibitedWords = []string{"kerfuffle", "sharbert", "fornax"}
 
 func main() {
 	godotenv.Load()
+
+	var apiCfg = apiConfig{
+		fileserverHits: atomic.Int32{},
+		jwtSecret: os.Getenv("JWT_SECRET"),
+	}
+
 	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
 	
 	if err != nil {
@@ -65,6 +68,20 @@ func main() {
 	serveMux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(healthHandler))
 	
 	createChirp := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(&r.Header)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, err.Error())
+			return
+		}
+
+		authenticatedUserId, err := auth.ValidateJWT(token, apiCfg.jwtSecret)
+
+		if err != nil {
+			utils.RespondWithJSon(w, 401, err.Error())
+			return
+		}
+
 		type successResponse struct {
 			Id				uuid.UUID	`json:"id"`
 			UserId		uuid.UUID	`json:"user_id"`
@@ -75,14 +92,13 @@ func main() {
 
 		type reqBody struct {
 			Body 		string `json:"body"`
-			UserId	string `json:"user_id"`
 		} 
 
 		var decodedRedBody reqBody
 
 		decoder := json.NewDecoder(r.Body)
 		
-		err := decoder.Decode(&decodedRedBody)
+		err = decoder.Decode(&decodedRedBody)
 
 		if err != nil {
 			utils.RespondWithError(w, 500, genericErrorMessage)
@@ -98,15 +114,8 @@ func main() {
 
 		cleanMsg := utils.GetCorrectedString(decodedRedBody.Body, prohibitedWords)
 
-		parsedUUID, err := uuid.Parse(decodedRedBody.UserId)
-
-		if err != nil {
-			utils.RespondWithError(w, 400, "invalid user id")
-			return
-		}
-
 		chirp, err := dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
-			UserID: parsedUUID,
+			UserID: authenticatedUserId,
 			Body: cleanMsg.CorrectedMsg,
 		})
 
@@ -208,8 +217,9 @@ func main() {
 	
 	login := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		type body struct {
-			Email			string	`json:"email"`
-			Password	string	`json:"password"`
+			Email							string	`json:"email"`
+			Password					string	`json:"password"`
+			ExpiresInSeconds	int	`json:"expires_in_seconds,omitempty"`
 		}
 
 		type sucessResponse struct {
@@ -217,6 +227,7 @@ func main() {
 			UpdatedAt	time.Time	`json:"updated_at"`
 			CreatedAt	time.Time	`json:"created_at"`
 			Email			string		`json:"email"`
+			Token			string		`json:"token"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -242,11 +253,25 @@ func main() {
 			utils.RespondWithError(w, 401, "Invalid email or password")
 		}
 
+		jwtExpiration := time.Duration(decodedBody.ExpiresInSeconds) * time.Second
+
+		if jwtExpiration == 0 {
+			jwtExpiration = time.Duration(1) * time.Hour
+		}
+
+		token, err := auth.MakeJWT(user.ID, apiCfg.jwtSecret, jwtExpiration)
+
+		if err != nil {
+			utils.RespondWithJSon(w, 500, genericErrorMessage)
+			return
+		}
+
 		response := sucessResponse{
 			Id: user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
+			Token: token,
 		}
 
 		utils.RespondWithJSon(w, 200, response)
