@@ -219,15 +219,15 @@ func main() {
 		type body struct {
 			Email							string	`json:"email"`
 			Password					string	`json:"password"`
-			ExpiresInSeconds	int	`json:"expires_in_seconds,omitempty"`
 		}
 
 		type sucessResponse struct {
-			Id				uuid.UUID	`json:"id"`
-			UpdatedAt	time.Time	`json:"updated_at"`
-			CreatedAt	time.Time	`json:"created_at"`
-			Email			string		`json:"email"`
-			Token			string		`json:"token"`
+			Id						uuid.UUID	`json:"id"`
+			UpdatedAt			time.Time	`json:"updated_at"`
+			CreatedAt			time.Time	`json:"created_at"`
+			Email					string		`json:"email"`
+			Token					string		`json:"token"`
+			RefreshToken	string		`json:"refresh_token"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -253,7 +253,7 @@ func main() {
 			utils.RespondWithError(w, 401, "Invalid email or password")
 		}
 
-		jwtExpiration := time.Duration(decodedBody.ExpiresInSeconds) * time.Second
+		jwtExpiration := time.Duration(3600) * time.Second
 
 		if jwtExpiration == 0 {
 			jwtExpiration = time.Duration(1) * time.Hour
@@ -266,12 +266,34 @@ func main() {
 			return
 		}
 
+
+		refreshTokenExpiration := time.Now().Add(60 * 24 * time.Hour)
+
+		refreshToken, err := auth.MakeRefreshToken()
+
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		}
+
+		_, err = dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+			Token: sql.NullString{String: refreshToken, Valid: true},
+			UserID: uuid.NullUUID{UUID: user.ID, Valid: true},
+			ExpiresAt: sql.NullTime{Time: refreshTokenExpiration, Valid: true},
+		})
+
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		} 
+
 		response := sucessResponse{
 			Id: user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
 			Token: token,
+			RefreshToken: refreshToken,
 		}
 
 		utils.RespondWithJSon(w, 200, response)
@@ -348,6 +370,71 @@ func main() {
 
 		utils.RespondWithJSon(w, 200, res)
 	})
+
+	refresh := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type SuccessResponse struct {
+			Token	string	`json:"token"`
+		}
+
+		bearerToken, err := auth.GetBearerToken(&r.Header)
+	
+		if err != nil {
+			utils.RespondWithError(w, 401, "Invalid refresh token")
+			return
+		}
+
+		user, err := dbQueries.GetUserFromRefreshToken(r.Context(), sql.NullString{String: bearerToken, Valid: true})
+
+		if err != nil {
+			utils.RespondWithError(w, 401, "Invalid refresh token")
+			return
+		}
+		
+		tokenExpiration := user.ExpiresAt
+		isExpired := time.Now().After(tokenExpiration)
+
+		isRevoked := user.RevokedAt.Valid && !user.RevokedAt.Time.IsZero()
+
+		if isExpired || isRevoked {
+			utils.RespondWithError(w, 401, "Invalid refresh token")
+			return
+		}
+
+		jwtToken, err := auth.MakeJWT(user.UserID, apiCfg.jwtSecret, time.Duration(3600) * time.Second)
+
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		}
+
+		response := SuccessResponse{
+			Token: jwtToken,
+		}
+
+		utils.RespondWithJSon(w, 200, response)
+	})
+
+	serveMux.Handle("POST /api/refresh", apiCfg.middlewareMetricsInc(refresh))
+
+	revoke := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bearerToken, err := auth.GetBearerToken(&r.Header)
+	
+		if err != nil {
+			utils.RespondWithError(w, 401, "Invalid refresh token")
+			return
+		}
+
+		err = dbQueries.RevokeToken(r.Context(), sql.NullString{String: bearerToken, Valid: true})
+
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		}
+
+		utils.RespondWithJSon(w, 204, nil)
+	})
+
+	serveMux.Handle("POST /api/revoke", apiCfg.middlewareMetricsInc(revoke))
 	
 	serveMux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(getChirp))
 

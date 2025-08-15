@@ -6,3 +6,5 @@ sql:
     gen:
       go:
         out: "internal/database"
+    database:
+      uri: "postgresql://postgres:postgres@localhost:5432/chirpy"
