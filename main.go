@@ -214,6 +214,65 @@ func main() {
 	})
 
 	serveMux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(createUser))
+
+	updateUser := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type Input struct {
+			Email 		string `json:"email"`
+			Password 	string `json:"password"`
+		}	
+
+		decoder := json.NewDecoder(r.Body)
+
+		var decodedInput Input
+
+		err := decoder.Decode(&decodedInput)
+
+		if err != nil {
+			utils.RespondWithError(w, 400, "Wrong input data")
+			return
+		}
+
+		bearerToken, err := auth.GetBearerToken(&r.Header)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, genericErrorMessage)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(bearerToken, apiCfg.jwtSecret)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, err.Error())
+			return
+		}
+
+		hashedPassword, err := auth.HashPassword(decodedInput.Password)
+		
+		if err != nil {
+			utils.RespondWithError(w, 500, genericErrorMessage)
+			return
+		}
+
+		user, err := dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+			ID: userId,
+			Email: decodedInput.Email,
+			HashedPassword: hashedPassword,
+		})
+
+		if err != nil {
+			utils.RespondWithError(w, 500, "a user with that email already exists")
+			return
+		}
+
+		type UpdateUserResponse struct {
+			Email			string		`json:"email"`
+		}
+
+		utils.RespondWithJSon(w, 200, UpdateUserResponse{
+			Email: user.Email,
+		})
+	})
+	serveMux.Handle("PUT /api/users", apiCfg.middlewareMetricsInc(updateUser))
 	
 	login := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		type body struct {
