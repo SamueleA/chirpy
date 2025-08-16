@@ -394,6 +394,47 @@ func main() {
 
 	serveMux.Handle("GET /api/chirps", apiCfg.middlewareMetricsInc(getChirps))
 
+	deleteChirp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chirpID := r.PathValue("chirpID")
+
+		bearerToken, err := auth.GetBearerToken(&r.Header)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, genericErrorMessage)
+			return
+		}
+
+		userID, err := auth.ValidateJWT(bearerToken, apiCfg.jwtSecret)
+
+		parsedChirpID, err := uuid.Parse(chirpID)
+	
+		if err != nil {
+			utils.RespondWithError(w, 400, genericErrorMessage)
+			return
+		}
+
+		chirp, err := dbQueries.GetChirp(r.Context(), parsedChirpID)
+
+		if err != nil {
+			utils.RespondWithError(w, 404, genericErrorMessage)
+			return
+		}
+		if userID != chirp.UserID {
+			utils.RespondWithError(w, 403, "Unauthorized")
+			return
+		}
+
+		err = dbQueries.DeleteChirp(r.Context(), chirp.ID)
+		if err != nil {
+			utils.RespondWithError(w, 404, "not found")
+			return
+		}
+
+		utils.RespondWithJSon(w, 204, nil)
+	})
+	
+	serveMux.Handle("DELETE /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(deleteChirp))
+
 	getChirp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chirpID := r.PathValue("chirpID")
 
