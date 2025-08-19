@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -51,12 +53,47 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, created_at, updated_at, email, hashed_password FROM users
+SELECT id, created_at, updated_at, email, hashed_password, is_chirpy_red FROM users
 WHERE email=$1
 `
 
-func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
+type GetUserRow struct {
+	ID             uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Email          string
+	HashedPassword string
+	IsChirpyRed    bool
+}
+
+func (q *Queries) GetUser(ctx context.Context, email string) (GetUserRow, error) {
 	row := q.db.QueryRowContext(ctx, getUser, email)
+	var i GetUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.HashedPassword,
+		&i.IsChirpyRed,
+	)
+	return i, err
+}
+
+const updateChirpyRedStatus = `-- name: UpdateChirpyRedStatus :one
+UPDATE users
+SET is_chirpy_red = $1
+WHERE id = $2
+RETURNING id, created_at, updated_at, email, hashed_password
+`
+
+type UpdateChirpyRedStatusParams struct {
+	Status sql.NullBool
+	UserID uuid.NullUUID
+}
+
+func (q *Queries) UpdateChirpyRedStatus(ctx context.Context, arg UpdateChirpyRedStatusParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateChirpyRedStatus, arg.Status, arg.UserID)
 	var i User
 	err := row.Scan(
 		&i.ID,

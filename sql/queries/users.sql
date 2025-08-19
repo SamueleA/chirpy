@@ -10,7 +10,7 @@ VALUES (
 RETURNING *;
 
 -- name: GetUser :one
-SELECT * FROM users
+SELECT id, created_at, updated_at, email, hashed_password, is_chirpy_red FROM users
 WHERE email=$1;
 
 -- name: ClearUsers :exec
@@ -20,4 +20,10 @@ DELETE FROM users;
 UPDATE users
 SET hashed_password=$2, email=$3
 WHERE id=$1
+RETURNING *;
+
+-- name: UpdateChirpyRedStatus :one
+UPDATE users
+SET is_chirpy_red = @status
+WHERE id = @user_id
 RETURNING *;

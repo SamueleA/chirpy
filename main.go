@@ -199,10 +199,11 @@ func main() {
 		}
 
 		type CreateUserResponse struct {
-			ID 				uuid.UUID `json:"id"`
-			CreatedAt time.Time `json:"created_at"`
-			UpdatedAt	time.Time	`json:"updated_at"`
-			Email			string		`json:"email"`
+			ID 					uuid.UUID `json:"id"`
+			CreatedAt 	time.Time `json:"created_at"`
+			UpdatedAt		time.Time	`json:"updated_at"`
+			Email				string		`json:"email"`
+			IsChirpyRed	bool			`json:"is_chirpy_red"`
 		}
 
 		utils.RespondWithJSon(w, 201, CreateUserResponse{
@@ -210,6 +211,7 @@ func main() {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
+			IsChirpyRed: user.IsChirpyRed,	
 		})
 	})
 
@@ -287,6 +289,7 @@ func main() {
 			Email					string		`json:"email"`
 			Token					string		`json:"token"`
 			RefreshToken	string		`json:"refresh_token"`
+			IsChirpyRed		bool			`json:"is_chirpy_red"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -344,7 +347,7 @@ func main() {
 		if err != nil {
 			utils.RespondWithError(w, 500, genericErrorMessage)
 			return
-		} 
+		}
 
 		response := sucessResponse{
 			Id: user.ID,
@@ -353,6 +356,7 @@ func main() {
 			Email: user.Email,
 			Token: token,
 			RefreshToken: refreshToken,
+			IsChirpyRed: user.IsChirpyRed,
 		}
 
 		utils.RespondWithJSon(w, 200, response)
@@ -538,7 +542,48 @@ func main() {
 	
 	serveMux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(getChirp))
 
-	serveMux.Handle("POST /admin/reset", resetHandler)
+	polkaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type webhookData struct {
+			UserId	uuid.UUID	`json:"user_id"`
+		}
+		
+		type body struct {
+			Event	string			`json:"event"`
+			Data	webhookData	`json:"data"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+
+		var decodedBody body
+		
+		err := decoder.Decode(&decodedBody)
+
+		if err != nil {
+			utils.RespondWithJSon(w, 400, genericErrorMessage)
+			return
+		}
+
+		if decodedBody.Event != "user.upgraded" {
+			utils.RespondWithJSon(w, 204, nil)
+			return
+		}
+
+		_, err = dbQueries.UpdateChirpyRedStatus(r.Context(), database.UpdateChirpyRedStatusParams{
+			UserID: uuid.NullUUID{ UUID: decodedBody.Data.UserId, Valid: true},
+			Status: sql.NullBool{ Bool: true, Valid: true },
+		})
+
+		if err != nil {
+			utils.RespondWithError(w, 404, genericErrorMessage)
+			return
+		}
+
+		utils.RespondWithJSon(w, 204, nil)
+	})
+
+	serveMux.Handle("POST /api/polka/webhooks", apiCfg.middlewareMetricsInc(polkaHandler))
+
+	serveMux.Handle("POST /admin/reset", resetHandler) 
 	
 	server := &http.Server{
 		Addr: ":8080",
