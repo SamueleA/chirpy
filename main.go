@@ -23,6 +23,7 @@ var genericErrorMessage string =  "Something went wrong"
 type apiConfig struct {
 	fileserverHits 	atomic.Int32
 	jwtSecret				string
+	polkaApiKey			string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -40,6 +41,7 @@ func main() {
 	var apiCfg = apiConfig{
 		fileserverHits: atomic.Int32{},
 		jwtSecret: os.Getenv("JWT_SECRET"),
+		polkaApiKey: os.Getenv("POLKA_API_KEY"),
 	}
 
 	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
@@ -543,6 +545,18 @@ func main() {
 	serveMux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(getChirp))
 
 	polkaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polApiKey, err := auth.GetApiKey(r.Header)
+
+		if err != nil {
+			utils.RespondWithError(w, 401, genericErrorMessage)
+			return
+		}
+
+		if polApiKey != apiCfg.polkaApiKey {
+			utils.RespondWithError(w, 401, genericErrorMessage)
+			return
+		}
+
 		type webhookData struct {
 			UserId	uuid.UUID	`json:"user_id"`
 		}
@@ -556,7 +570,7 @@ func main() {
 
 		var decodedBody body
 		
-		err := decoder.Decode(&decodedBody)
+		err = decoder.Decode(&decodedBody)
 
 		if err != nil {
 			utils.RespondWithJSon(w, 400, genericErrorMessage)
