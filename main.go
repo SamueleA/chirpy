@@ -377,10 +377,27 @@ func main() {
 
 		type response []successResponse
 
-		chirps, err := dbQueries.GetChirps(r.Context())
+		searchByAuthorId := r.URL.Query().Get("author_id");
 
-		if err != nil {
-			utils.RespondWithError(w, 500, genericErrorMessage)
+		var chirps []database.Chirp
+		if searchByAuthorId == "" {
+			chirps, err = dbQueries.GetChirps(r.Context())
+			if err != nil {
+				utils.RespondWithError(w, 500, genericErrorMessage)
+				return
+			}
+		} else {
+			authorId, err := uuid.Parse(searchByAuthorId)
+			if err != nil {
+				utils.RespondWithError(w, 400, genericErrorMessage)
+				return
+			}
+			chirps, err = dbQueries.GetChirpsByUserID(r.Context(), authorId)
+
+			if err != nil {
+				utils.RespondWithError(w, 500, genericErrorMessage)
+				return
+			}
 		}
 
 		var chirpList response
