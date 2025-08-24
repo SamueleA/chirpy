@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -400,6 +401,14 @@ func main() {
 			}
 		}
 
+		sort_order := r.URL.Query().Get("sort");
+
+		if (sort_order == "desc") {
+			sort.Slice(chirps, func(i, j int) bool {
+				return time.Time(chirps[i].CreatedAt).After(time.Time(chirps[j].CreatedAt))
+			})
+		}
+		
 		var chirpList response
 		for i := range(len(chirps)) {
 			chirp := chirps[i]
